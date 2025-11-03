@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <title>VectorCam RTS インスタレーション</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <style>
+      :root {
+        color-scheme: dark;
+        font-family: "Noto Sans JP", system-ui, sans-serif;
+        --accent: #007bff;
+        --accent-soft: rgba(0, 123, 255, 0.2);
+        background-color: #020617;
+        color: #e2e8f0;
+      }
+
+      body {
+        margin: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 1.5rem;
+        padding: 1.5rem;
+      }
+
+      header {
+        text-align: center;
+      }
+
+      h1 {
+        margin: 0;
+        font-size: clamp(1.5rem, 4vw, 2.75rem);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--accent);
+      }
+
+      p {
+        margin: 0.25rem 0 0;
+        font-size: 0.95rem;
+        color: #94a3b8;
+      }
+
+      #hud {
+        display: grid;
+        gap: 0.75rem;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        width: min(960px, 100%);
+      }
+
+      .panel {
+        border: 1px solid var(--accent-soft);
+        border-radius: 12px;
+        padding: 1rem;
+        background: radial-gradient(circle at top, rgba(0, 123, 255, 0.18), rgba(2, 6, 23, 0.9));
+        box-shadow: 0 0 30px rgba(0, 123, 255, 0.08);
+      }
+
+      .panel h2 {
+        margin: 0 0 0.75rem;
+        font-size: 1rem;
+        color: var(--accent);
+        letter-spacing: 0.04em;
+      }
+
+      .stats {
+        display: flex;
+        flex-direction: column;
+        gap: 0.35rem;
+        font-size: 0.95rem;
+      }
+
+      button {
+        font: inherit;
+        padding: 0.6rem 1rem;
+        border-radius: 9999px;
+        border: 1px solid var(--accent);
+        background: linear-gradient(135deg, rgba(0, 123, 255, 0.9), rgba(14, 165, 233, 0.6));
+        color: #f8fafc;
+        cursor: pointer;
+        transition: transform 0.15s ease, box-shadow 0.15s ease;
+      }
+
+      button:disabled {
+        opacity: 0.4;
+        cursor: not-allowed;
+        box-shadow: none;
+      }
+
+      button:not(:disabled):hover {
+        transform: translateY(-2px);
+        box-shadow: 0 10px 20px rgba(0, 123, 255, 0.25);
+      }
+
+      #message {
+        font-size: 1rem;
+        color: #f1f5f9;
+        min-height: 1.5rem;
+        text-align: center;
+      }
+
+      #battlefield {
+        width: min(960px, 100%);
+        border-radius: 24px;
+        border: 1px solid var(--accent-soft);
+        background: linear-gradient(160deg, rgba(3, 7, 18, 0.95), rgba(2, 132, 199, 0.15));
+        box-shadow: inset 0 0 40px rgba(0, 123, 255, 0.08);
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>VECTOR-CAM RTS</h1>
+      <p>資源を集め、数の論理で城壁を突破せよ。閾値を超えた瞬間、世界は一変する。</p>
+    </header>
+
+    <section id="hud">
+      <article class="panel">
+        <h2>オペレーション</h2>
+        <div class="stats">
+          <button id="addGatherer">採取班を編成 (20資源)</button>
+          <button id="addSoldier">歩兵を展開 (15資源)</button>
+          <button id="launchAssault">突撃コマンド</button>
+        </div>
+      </article>
+      <article class="panel">
+        <h2>ステータス</h2>
+        <div class="stats" id="stats"></div>
+      </article>
+      <article class="panel">
+        <h2>戦術メモ</h2>
+        <p>城壁前の銃座は数が揃わない部隊を即座に排除する。臨界数 25 を達成した瞬間、制圧が完了する。</p>
+      </article>
+    </section>
+
+    <div id="message"></div>
+    <canvas id="battlefield" width="960" height="540"></canvas>
+
+    <script defer src="./src/game.js"></script>
+  </body>
+</html>
