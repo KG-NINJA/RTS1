@@ -18,6 +18,152 @@ const config = {
   enemyVolleyCooldown: 8 // 迎撃のインターバル(s)
 };
 
+// 効果音合成と音声アナウンスを制御する状態
+const audioState = {
+  ctx: null,
+  masterGain: null
+};
+
+const voiceState = {
+  preferredVoice: null,
+  cooldowns: new Map()
+};
+
+// AudioContextの生成をユーザー操作後に行うユーティリティ
+function ensureAudioContext() {
+  const AudioCtx = window.AudioContext || window.webkitAudioContext;
+  if (!AudioCtx) return null;
+  if (!audioState.ctx) {
+    audioState.ctx = new AudioCtx();
+    audioState.masterGain = audioState.ctx.createGain();
+    audioState.masterGain.gain.value = 0.18;
+    audioState.masterGain.connect(audioState.ctx.destination);
+  }
+  if (audioState.ctx.state === "suspended") {
+    audioState.ctx.resume();
+  }
+  return audioState.ctx;
+}
+
+// 単音をスケジュールするヘルパー
+function scheduleTone(ctx, options) {
+  const { startFreq, endFreq, duration, type = "sine", gain = 0.22, startTime = ctx.currentTime } = options;
+  const osc = ctx.createOscillator();
+  const amp = ctx.createGain();
+  osc.type = type;
+  osc.frequency.setValueAtTime(startFreq, startTime);
+  if (typeof endFreq === "number" && endFreq !== startFreq) {
+    osc.frequency.linearRampToValueAtTime(endFreq, startTime + duration);
+  }
+  amp.gain.value = gain;
+  amp.gain.exponentialRampToValueAtTime(0.001, startTime + duration);
+  osc.connect(amp).connect(audioState.masterGain);
+  osc.start(startTime);
+  osc.stop(startTime + duration + 0.02);
+  return startTime + duration;
+}
+
+// ノイズ系効果音を生成（断末魔などの荒々しい音に使用）
+function playNoiseBurst(ctx, duration = 0.6) {
+  const length = Math.floor(ctx.sampleRate * duration);
+  const buffer = ctx.createBuffer(1, length, ctx.sampleRate);
+  const data = buffer.getChannelData(0);
+  for (let i = 0; i < length; i++) {
+    const t = i / length;
+    data[i] = (Math.random() * 2 - 1) * Math.pow(1 - t, 1.2) * (0.7 + Math.random() * 0.3);
+  }
+  const source = ctx.createBufferSource();
+  source.buffer = buffer;
+  const gain = ctx.createGain();
+  gain.gain.value = 0.32;
+  gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + duration);
+  source.connect(gain).connect(audioState.masterGain);
+  source.start();
+}
+
+// 効果音プリセットを名前で鳴らす
+function playAudioCue(name) {
+  const ctx = ensureAudioContext();
+  if (!ctx || !audioState.masterGain) return;
+  const base = ctx.currentTime + 0.02;
+  const addTone = (offset, params) => scheduleTone(ctx, { ...params, startTime: base + offset });
+
+  switch (name) {
+    case "gather":
+      addTone(0, { startFreq: 520, endFreq: 720, duration: 0.16, type: "sine", gain: 0.16 });
+      break;
+    case "soldier":
+      addTone(0, { startFreq: 240, endFreq: 310, duration: 0.12, type: "triangle", gain: 0.2 });
+      addTone(0.08, { startFreq: 310, endFreq: 260, duration: 0.1, type: "sawtooth", gain: 0.18 });
+      break;
+    case "assault":
+      addTone(0, { startFreq: 200, endFreq: 520, duration: 0.4, type: "sawtooth", gain: 0.22 });
+      addTone(0.32, { startFreq: 520, endFreq: 420, duration: 0.3, type: "triangle", gain: 0.18 });
+      break;
+    case "alert":
+      addTone(0, { startFreq: 660, endFreq: 340, duration: 0.45, type: "square", gain: 0.25 });
+      addTone(0.3, { startFreq: 480, endFreq: 360, duration: 0.35, type: "square", gain: 0.2 });
+      break;
+    case "enemy":
+      addTone(0, { startFreq: 410, endFreq: 540, duration: 0.24, type: "triangle", gain: 0.14 });
+      break;
+    case "victory":
+      addTone(0, { startFreq: 660, endFreq: 660, duration: 0.18, type: "sine", gain: 0.2 });
+      addTone(0.18, { startFreq: 880, endFreq: 940, duration: 0.22, type: "sine", gain: 0.22 });
+      addTone(0.36, { startFreq: 1040, endFreq: 880, duration: 0.3, type: "triangle", gain: 0.2 });
+      break;
+    case "scream":
+      playNoiseBurst(ctx, 0.7);
+      addTone(0, { startFreq: 980, endFreq: 320, duration: 0.45, type: "sawtooth", gain: 0.28 });
+      addTone(0.22, { startFreq: 540, endFreq: 180, duration: 0.4, type: "triangle", gain: 0.22 });
+      break;
+    default:
+      break;
+  }
+}
+
+// 音声合成の声候補を取得
+function refreshVoices() {
+  const synth = window.speechSynthesis;
+  if (!synth) return;
+  const voices = synth.getVoices();
+  if (!voices.length) return;
+  const female = voices.find((voice) => voice.lang.startsWith("en") && /female|woman|amy|aria|emma|ava|jenny|salli|joanna|scarlett/i.test(voice.name));
+  voiceState.preferredVoice = female || voices.find((voice) => voice.lang.startsWith("en")) || voices[0];
+}
+
+// 英語アナウンスを実行
+function speakEnglish(text, key) {
+  const synth = window.speechSynthesis;
+  if (!synth || !text) return;
+  if (!voiceState.preferredVoice) {
+    refreshVoices();
+  }
+  if (typeof SpeechSynthesisUtterance === "undefined") return;
+  const now = (typeof performance !== "undefined" && performance.now) ? performance.now() : Date.now();
+  if (key) {
+    const last = voiceState.cooldowns.get(key) || 0;
+    if (now - last < 1600) return;
+    voiceState.cooldowns.set(key, now);
+  }
+  const utterance = new SpeechSynthesisUtterance(text);
+  utterance.lang = "en-US";
+  utterance.pitch = 1.05;
+  utterance.rate = 1;
+  if (voiceState.preferredVoice) {
+    utterance.voice = voiceState.preferredVoice;
+  }
+  synth.speak(utterance);
+}
+
+if (typeof window !== "undefined") {
+  window.addEventListener("pointerdown", ensureAudioContext, { once: true });
+  window.addEventListener("keydown", ensureAudioContext, { once: true });
+  if (window.speechSynthesis) {
+    window.speechSynthesis.addEventListener("voiceschanged", refreshVoices);
+  }
+}
+
 // シンプルなイージング関数（突撃時の加速感を演出）
 const easeOutCubic = (t) => 1 - Math.pow(1 - t, 3);
 
@@ -130,6 +276,18 @@ const state = {
   enemySwarmers: []
 };
 
+// メッセージ更新とサウンド・音声アナウンスをまとめて処理
+function updateMessage(text, options = {}) {
+  state.message = text;
+  if (options.voice) {
+    const voiceKey = options.voiceKey || options.cue || text;
+    speakEnglish(options.voice, voiceKey);
+  }
+  if (options.cue) {
+    playAudioCue(options.cue);
+  }
+}
+
 // 初期歩兵を配備
 for (let i = 0; i < 6; i++) {
   state.soldierUnits.push(createSoldier());
@@ -156,20 +314,32 @@ addGathererBtn.addEventListener("click", () => {
   if (state.resources < config.gathererCost || state.phase !== "ready") return;
   state.resources -= config.gathererCost;
   state.gatherers += 1;
-  state.message = "採取班が増援。青の軌跡が伸びていく。";
+  updateMessage("採取班が増援。青の軌跡が伸びていく。", {
+    voice: "Resource convoy expanding. Keep the flow steady.",
+    cue: "gather",
+    voiceKey: "gatherer"
+  });
 });
 
 addSoldierBtn.addEventListener("click", () => {
   if (state.resources < config.soldierCost || state.phase !== "ready") return;
   state.resources -= config.soldierCost;
   state.soldierUnits.push(createSoldier());
-  state.message = "歩兵が隊列に加わった。臨界へあと一歩。";
+  updateMessage("歩兵が隊列に加わった。臨界へあと一歩。", {
+    voice: "Infantry column reinforced. Closing on threshold.",
+    cue: "soldier",
+    voiceKey: "soldier"
+  });
 });
 
 launchAssaultBtn.addEventListener("click", () => {
   if (state.phase !== "ready") return;
   if (soldierCount() === 0) {
-    state.message = "突撃可能な歩兵が存在しない。";
+    updateMessage("突撃可能な歩兵が存在しない。", {
+      voice: "No assault teams available. Produce units first.",
+      cue: "alert",
+      voiceKey: "noAssault"
+    });
     return;
   }
   if (soldierCount() >= config.assaultThreshold) {
@@ -178,14 +348,22 @@ launchAssaultBtn.addEventListener("click", () => {
     state.assaultOutcome = "success";
     state.attackTime = 0;
     state.enemySwarmers = [];
-    state.message = "番号！ 突撃！ 城壁へ向けて進軍中…";
+    updateMessage("番号！ 突撃！ 城壁へ向けて進軍中…", {
+      voice: "Spearhead is charging the enemy bastion. Initiate storm protocol.",
+      cue: "assault",
+      voiceKey: "assaultGo"
+    });
   } else {
     state.phase = "assaulting";
     state.assaultOutcome = "fail";
     state.assaultProgress = 0;
     state.failAssaultProgress = 0;
     state.enemySwarmers = [];
-    state.message = "突撃開始… しかし銃座の射界が迫っている。";
+    updateMessage("突撃開始… しかし銃座の射界が迫っている。", {
+      voice: "Enemy turrets locking on. Reinforce before the breach.",
+      cue: "alert",
+      voiceKey: "premature"
+    });
   }
 });
 
@@ -584,7 +762,11 @@ function updateEnemyAI(deltaSeconds, now) {
       state.enemyResources -= config.enemyUnitCost;
       state.enemyUnits.push(createEnemyUnit());
       if (state.enemyUnits.length % 4 === 0) {
-        state.message = "敵も部隊を再編している。迎撃線が厚みを増した。";
+        updateMessage("敵も部隊を再編している。迎撃線が厚みを増した。", {
+          voice: "Enemy reinforcements detected on the defensive ring.",
+          cue: "enemy",
+          voiceKey: "enemyReorg"
+        });
       }
     }
   }
@@ -597,7 +779,11 @@ function updateEnemyAI(deltaSeconds, now) {
     if (volleyCasualties > 0) {
       state.soldierUnits.splice(-volleyCasualties, volleyCasualties);
       state.defeatFlash = Math.max(state.defeatFlash, 0.85);
-      state.message = `敵迎撃部隊の集中射撃で味方歩兵が${volleyCasualties}名失われた。`;
+      updateMessage(`敵迎撃部隊の集中射撃で味方歩兵が${volleyCasualties}名失われた。`, {
+        voice: "Hostile volley ripping through the line!",
+        cue: "scream",
+        voiceKey: "enemyVolley"
+      });
       if (state.phase === "ready") {
         state.moraleShockUntil = Math.max(state.moraleShockUntil, now + 2400);
       }
@@ -653,7 +839,11 @@ function gameLoop(now) {
     state.failAssaultProgress = 0;
     state.defeatFlash = Math.max(state.defeatFlash, 0.9);
     state.moraleShockUntil = Math.max(state.moraleShockUntil, now + config.moraleShockDelay);
-    state.message = "兵力が枯渇し、突撃隊が瓦解した。再編が必要だ。";
+    updateMessage("兵力が枯渇し、突撃隊が瓦解した。再編が必要だ。", {
+      voice: "We're being torn apart! Aghhh— pull back now!",
+      cue: "scream",
+      voiceKey: "assaultCollapse"
+    });
   }
 
   if (state.phase === "ready") {
@@ -667,13 +857,21 @@ function gameLoop(now) {
       state.phase = "breach";
       state.assaultOutcome = null;
       state.attackTime = 0;
-      state.message = "突入完了！ 城壁に集束砲火を浴びせる。";
+      updateMessage("突入完了！ 城壁に集束砲火を浴びせる。", {
+        voice: "Inside the enemy fortress. Clean sweep the courtyard now.",
+        cue: "assault",
+        voiceKey: "breach"
+      });
     } else if (state.assaultOutcome === "fail" && state.assaultProgress >= 1) {
       state.phase = "redAssault";
       state.failAssaultProgress = 0;
       state.defeatFlash = 1;
       state.moraleShockUntil = now + config.moraleShockDelay;
-      state.message = "銃座の十字砲火で部隊が霧散… 数の論理を満たせ。";
+      updateMessage("銃座の十字砲火で部隊が霧散… 数の論理を満たせ。", {
+        voice: "We're caught in turret crossfire! Aaa— fall back!",
+        cue: "scream",
+        voiceKey: "redAssault"
+      });
     }
   } else if (state.phase === "redAssault") {
     state.failAssaultProgress = Math.min(1, state.failAssaultProgress + deltaSeconds / config.failedAssaultDuration);
@@ -684,7 +882,11 @@ function gameLoop(now) {
       state.assaultProgress = 0;
       state.assaultOutcome = null;
       state.failAssaultProgress = 0;
-      state.message = "次は臨界 25 を満たして突破せよ。";
+      updateMessage("次は臨界 25 を満たして突破せよ。", {
+        voice: "Regroup and reach the critical threshold before attacking.",
+        cue: "gather",
+        voiceKey: "regroup"
+      });
     }
   } else if (state.phase === "breach") {
     state.attackTime += deltaSeconds;
@@ -700,7 +902,11 @@ function gameLoop(now) {
       state.collapseProgress = 0;
       state.wallChunks = createWallChunks();
       state.enemySwarmers = createEnemySwarmers();
-      state.message = "閾値突破！ 城壁は粉砕された。";
+      updateMessage("閾値突破！ 城壁は粉砕された。", {
+        voice: "Victory. Enemy wall collapsing now.",
+        cue: "victory",
+        voiceKey: "victory"
+      });
     }
   } else if (state.phase === "victory") {
     state.collapseProgress = Math.min(1, state.collapseProgress + deltaSeconds * config.collapseSpeed);
